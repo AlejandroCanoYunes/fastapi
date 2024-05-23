@@ -1,13 +1,14 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, ValidationError
 from typing import Optional, Literal
-from datetime import date
+from datetime import datetime
+import requests
 
 app = FastAPI()
 
 origins = [
-    "http://example.com",
+    "http://localhost:5173",
 ]
 
 app.add_middleware(
@@ -35,7 +36,7 @@ CanadianProvince = Literal[
     None
 ]
 
-Duration = Literal['0 - 6 months', '6 - 12 months', '12+ months']
+Duration = Literal['0 - 6 Months', '6 - 12 Months', '12+ Months']
 PayFrequency = Literal['WEEKLY', 'BIWEEKLY', 'TWICEMONTHLY', 'MONTHLY']
 
 class Summary(BaseModel):
@@ -45,7 +46,7 @@ class Summary(BaseModel):
     direct_deposit: Literal['yes', 'no']
     # contact-info
     dob: str
-    canadian_status: Literal['pr', 'citizen', 'work permit', 'student visa', 'other']
+    canadian_status: Literal['pr', 'citizen', 'work_permit', 'student_visa', 'other']
     state: CanadianProvince
     city: str
     postal_code: str
@@ -55,8 +56,8 @@ class Summary(BaseModel):
     # living
     own_home: Literal['yes', 'no']
     rent_mortgage_payment: int
-    property_value: Optional[str] = None
-    property_mortgage: Optional[str] = None
+    property_value: Optional[int] = None
+    property_mortgage: Optional[int] = None
     address_length_months: Literal[Duration]
 
     # financial
@@ -66,12 +67,12 @@ class Summary(BaseModel):
     in_consumer_proposal:  Literal['yes', 'no']
 
     # income
-    income_type: Literal['full time', 'part time', 'self employed', 'retired', 'social security', 'unemployed']
+    income_type: Literal['full_time', 'part_time', 'self_employed', 'retired', 'social_security', 'unemployed']
     job_title: str
     pay_date1: Optional[str] = None
     employer: Optional[str] = None
     time_at_job: Optional[Duration] = None
-    work_phone: Optional[str] = None
+    work_phone: Optional[int] = None
     pay_frequency: Optional[PayFrequency] = None
  
     # debt
@@ -84,7 +85,7 @@ class Summary(BaseModel):
     first_name: str
     last_name: str
     lead_id: str
-    ip_address: str
+    ip_address: str 
 
 
 @app.get("/")
@@ -93,6 +94,7 @@ def read_root():
 
 @app.post("/submit-application/")
 async def submit_application(data: Summary):
+    
     data_dict = data.model_dump()
     data_dict['requested_amount'] = int(data_dict['requested_amount'])
     
@@ -112,6 +114,39 @@ async def submit_application(data: Summary):
         "YT - Yukon": "YT"
     }
     
+    duration_mapping = {
+        "0 - 6 Months" : 6,
+        "6 - 12 Months": 12,
+        "12+ Months": 24
+    }
+    
     data_dict['state'] = state_mapping[data_dict['state']]
     
-    return {"message": "Application received", "data": data_dict}
+    if data_dict["address_length_months"] is not None: 
+        data_dict['address_length_months'] = duration_mapping[data_dict["address_length_months"]]
+    
+    if data_dict["time_at_job"] is not None:
+        data_dict['time_at_job'] = duration_mapping[data_dict["time_at_job"]]
+    
+    if data_dict['work_phone'] is not None:
+        data_dict['work_phone'] = str(data_dict['work_phone'])
+
+    
+    external_api_url = ""
+    
+    headers = {
+            "authorizationToken": "",
+            "Content-Type": "application/json"
+        }
+
+    response = requests.post(external_api_url, json=data_dict, headers=headers)
+    
+    print(data_dict)
+
+    # Handle the response from the external API
+    if response.status_code == 200:
+        return {"message": "Application received and forwarded to external API", "data": data_dict}
+    else:
+        raise HTTPException(status_code=response.status_code, detail=response.text)
+    
+    # return {"message": "Application received", "data": data_dict}
